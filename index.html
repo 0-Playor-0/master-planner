@@ -424,6 +424,12 @@ main{max-width:1200px;margin:0 auto;padding:22px 22px 120px}
 .hmenu-wrap:hover .hmenu,.hmenu.show{display:flex}
 .hmenu-item{display:block;width:100%;text-align:left;font-family:var(--body);font-size:13.5px;color:var(--mut);padding:10px 12px;border-radius:8px;transition:.12s;white-space:nowrap}
 .hmenu-item:hover{background:var(--panel2);color:var(--ink)}
+/* read-only share view */
+.ro-badge{display:none;align-items:center;gap:6px;font-family:var(--body);font-size:12.5px;color:var(--mut);border:1px solid var(--line2);border-radius:999px;padding:5px 12px;white-space:nowrap}
+body.ro .ro-badge{display:inline-flex}
+body.ro .hbtn,body.ro .dact,body.ro .class-all,body.ro .tk-push,body.ro .qf,body.ro .hmenu-item,
+body.ro .tk-check,body.ro .cmini{opacity:.4;cursor:not-allowed}
+body.ro #btn-export{opacity:1;cursor:pointer}
 </style>
 </head>
 <body>
@@ -437,6 +443,7 @@ main{max-width:1200px;margin:0 auto;padding:22px 22px 120px}
       </div>
       <button class="todaybtn" id="jump-today">◎ Today</button>
       <span class="hclock" id="hclock"></span>
+      <span class="ro-badge">👁 View only</span>
       <span class="hspacer"></span>
       <button class="hbtn" id="btn-workahead">⤢ Work ahead</button>
       <div class="hmenu-wrap" id="data-menu-wrap">
@@ -812,6 +819,15 @@ var store={
   set:function(k,v){try{if(this.ok){localStorage.setItem(k,v);return;}}catch(e){}mem[k]=v;}
 };
 if(!store.ok)document.getElementById("storewarn").style.display="block";
+
+/* ---------- read-only share links: ?view=1 or ?readonly=1 ---------- */
+var READONLY = /[?&](view|readonly)=1(&|$)/.test(location.search);
+if(READONLY) document.body.classList.add("ro");
+function guardEdit(){
+  if(READONLY){ toast("View-only link — editing is off"); return true; }
+  return false;
+}
+
 var KEY="mission_control_v1";
 var STATE={done:{},leaves:{},classDone:{},contestDone:{},pushed:{},pinned:{},noBackfill:{},selDate:TODAY,anchor:TODAY};
 (function(){var raw=store.get(KEY);if(raw){try{STATE=Object.assign(STATE,JSON.parse(raw));}catch(e){}}})();
@@ -1636,6 +1652,7 @@ function renderDay(){
     var head=el("div","class-block-head",'<span class="lbl">◲ Classes</span>');
     var allBtn=el("button","class-all"+(allDone?" on":""),allDone?"✓ All attended":"Tick all");
     allBtn.addEventListener("click",function(){
+      if(guardEdit())return;
       var makeDone=!allDone;
       fw.classes.forEach(function(c,i){STATE.classDone[ds+"#"+i]=makeDone;});
       persist();renderDay();renderCalendar();
@@ -1646,6 +1663,7 @@ function renderDay(){
       var row=el("div","class-row"+(cd?" done":""));
       row.innerHTML='<span class="cmini"></span><span class="ct">'+mstr(tmin(c[0]))+'</span><span class="cn">'+c[2]+'</span>';
       row.querySelector(".cmini").addEventListener("click",function(){
+        if(guardEdit())return;
         STATE.classDone[ds+"#"+i]=!STATE.classDone[ds+"#"+i];persist();renderDay();renderCalendar();
       });
       cb.appendChild(row);
@@ -1739,6 +1757,7 @@ function renderDay(){
         '<div class="tk-top"><span class="tk-tag contest">Contest</span><span class="tk-est">~2h</span></div>'+
         '<div class="tk-title">'+it.name+'</div><div class="tk-phase">'+it.sub+'</div></div>';
       ck.querySelector(".tk-check").addEventListener("click",function(){
+        if(guardEdit())return;
         STATE.contestDone[it.id]=!STATE.contestDone[it.id];persist();renderDay();renderCalendar();
       });
       sb.appendChild(ck);
@@ -1790,6 +1809,7 @@ function rebuildAll(){buildSchedule();renderRails();renderCalendar();renderDay()
 function refreshProgress(){renderRails();renderCalendar();renderDay();}
 
 function toggleTask(id){
+  if(guardEdit())return;
   STATE.done[id]=!STATE.done[id];
   persist();
   // Finishing a task must NOT re-plan the day — that pulls future work forward and
@@ -1802,6 +1822,7 @@ function toggleTask(id){
 /* Pushing a single task asks WHERE to push it, same as pushing a whole day. */
 var pushOneId=null;
 function pushSingle(id){
+  if(guardEdit())return;
   pushOneId=id;
   var cur=TASK_DATE[id]||STATE.selDate;
   var t=TASKS.filter(function(x){return x.id===id;})[0];
@@ -1814,6 +1835,7 @@ function pushSingle(id){
   show("pushone-overlay");
 }
 function doPushOne(){
+  if(guardEdit())return;
   if(!pushOneId) return;
   var id=pushOneId;
   var cur=TASK_DATE[id]||STATE.selDate;
@@ -1849,6 +1871,7 @@ function doPushOne(){
    comfort cap, bump a comparable-sized task there to the following day, and so on —
    a ripple forward instead of one overloaded day. */
 function doPushChain(){
+  if(guardEdit())return;
   if(!pushOneId) return;
   var startId=pushOneId;
   var snapshot={pushed:JSON.parse(JSON.stringify(STATE.pushed)),
@@ -1905,6 +1928,7 @@ function nextOpenDay(from){
 /* ---------- LEAVE ---------- */
 var leaveTarget=null;
 function openLeave(ds){
+  if(guardEdit())return;
   leaveTarget=ds;
   document.getElementById("leave-from").value=ds;
   document.getElementById("leave-to").value=ds;
@@ -1933,6 +1957,7 @@ document.getElementById("leave-x").addEventListener("click",function(){hide("lea
 /* ---------- BACKLOG (push a day's work) ---------- */
 var backTarget=null;
 function openBacklog(ds){
+  if(guardEdit())return;
   backTarget=ds;
   document.getElementById("back-desc").innerHTML="Didn't get to <b>"+fmt(ds)+"</b>? Push its unfinished tasks forward. They land on the next open days, priority order — AboutCode & MetaBrainz stay protected.";
   document.getElementById("back-what").value="incomplete";
@@ -1972,6 +1997,7 @@ document.getElementById("back-x").addEventListener("click",function(){hide("back
 /* ---------- WORK AHEAD (pull future work into a day) ---------- */
 var aheadTarget=null;
 function openAhead(ds){
+  if(guardEdit())return;
   aheadTarget=ds||STATE.selDate;
   document.getElementById("ahead-day").textContent=fmt(aheadTarget);
   renderAheadList();
@@ -2164,6 +2190,7 @@ function idFor(track, title, org){
 function gNodeIds(org,title){ if(!G_SESSIONS) buildTitleIndex(); return G_SESSIONS[org+"::"+title]||[]; }
 function gNodeDone(org,title){ var ids=gNodeIds(org,title); return ids.length>0 && ids.every(function(id){return !!STATE.done[id];}); }
 function flipGNode(org,title){
+  if(guardEdit())return;
   var ids=gNodeIds(org,title); if(!ids.length) return;
   var allDone=ids.every(function(id){return !!STATE.done[id];});
   ids.forEach(function(id){ if(allDone) delete STATE.done[id]; else STATE.done[id]=1; });
@@ -2173,6 +2200,7 @@ function flipGNode(org,title){
 function sNodeIds(title){ if(!S_SESSIONS) buildTitleIndex(); return S_SESSIONS[title]||[]; }
 function sNodeDone(title){ var ids=sNodeIds(title); return ids.length>0 && ids.every(function(id){return !!STATE.done[id];}); }
 function flipSNode(title){
+  if(guardEdit())return;
   var ids=sNodeIds(title); if(!ids.length) return;
   var allDone=ids.every(function(id){return !!STATE.done[id];});
   ids.forEach(function(id){ if(allDone) delete STATE.done[id]; else STATE.done[id]=1; });
@@ -2182,6 +2210,7 @@ function flipSNode(title){
 function mlNodeIds(title){ if(!ML_SESSIONS) buildTitleIndex(); return ML_SESSIONS[title]||[]; }
 function mlNodeDone(title){ var ids=mlNodeIds(title); return ids.length>0 && ids.every(function(id){return !!STATE.done[id];}); }
 function flipMlNode(title){
+  if(guardEdit())return;
   var ids=mlNodeIds(title); if(!ids.length) return;
   var allDone=ids.every(function(id){return !!STATE.done[id];});
   ids.forEach(function(id){ if(allDone) delete STATE.done[id]; else STATE.done[id]=1; });
@@ -2189,6 +2218,7 @@ function flipMlNode(title){
 }
 function isDone(id){ return id && !!STATE.done[id]; }
 function flipDone(id){
+  if(guardEdit())return;
   if(!id) return;
   if(STATE.done[id]) delete STATE.done[id]; else STATE.done[id]=1;
   persist(); refreshProgress();
@@ -2230,7 +2260,7 @@ function refreshTrackHeader(track){
 STATE.dsaSelf = STATE.dsaSelf||{};
 STATE.dsaOpt  = STATE.dsaOpt ||{};
 STATE.dsaNote = STATE.dsaNote||{};
-function toggleDsaFlag(map,id){ if(!id)return; if(STATE[map][id]) delete STATE[map][id]; else STATE[map][id]=1; persist(); }
+function toggleDsaFlag(map,id){ if(guardEdit())return; if(!id)return; if(STATE[map][id]) delete STATE[map][id]; else STATE[map][id]=1; persist(); }
 
 /* ---------- planned-date badge ---------- */
 // Returns a short "planned for" label for a task id, or a set of session ids.
@@ -2374,6 +2404,7 @@ function renderDSAView(){
       var solvedBtn=E("button","qf sol"+(isDone(id)?" on":""),"✓");
       solvedBtn.title="Solved";
       solvedBtn.addEventListener("click",function(){
+        if(guardEdit())return;
         // update state + this row only; no full re-render, so the topic stays open
         if(STATE.done[id]) delete STATE.done[id]; else STATE.done[id]=1;
         persist();
@@ -2412,6 +2443,7 @@ function renderDSAView(){
 
 /* ---------- DSA code/notes modal ---------- */
 function openCodeModal(id,title){
+  if(guardEdit())return;
   if(!id) return;
   var ov=document.getElementById("code-overlay");
   if(!ov){
@@ -2647,6 +2679,7 @@ var IMPORT_MAP = JSON.parse(document.getElementById("importmap").textContent);
 function rawGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
 
 function importOldRoadmaps(){
+  if(guardEdit())return;
   var report={dsa:0,ml:0,sna:0,gsoc:0,dsaSelf:0,dsaOpt:0,dsaNote:0};
   if(!TITLE2ID) buildTitleIndex();
 
@@ -2736,6 +2769,7 @@ function exportJSON(){
   toast("Progress exported to JSON — keep this file as your backup.");
 }
 function applyBlob(obj){
+  if(guardEdit())return false;
   if(!obj||obj._app!=="mission-control"){ toast("That doesn't look like a Mission Control backup."); return false; }
   ["done","leaves","classDone","contestDone","pushed","pinned","noBackfill","dsaSelf","dsaOpt","dsaNote"].forEach(function(k){ if(obj[k]) STATE[k]=obj[k]; });
   if(obj.selDate) STATE.selDate=obj.selDate;
