@@ -414,6 +414,13 @@ main{max-width:1200px;margin:0 auto;padding:22px 22px 120px}
 .sheet-b textarea{width:100%;background:var(--bg2);border:1px solid var(--line2);border-radius:9px;color:var(--ink);padding:10px 12px;font-family:var(--body);font-size:14px;resize:vertical}
 .sheet-b textarea:focus{outline:none;border-color:var(--dsa)}
 .sheet-actions{display:flex;gap:8px;margin-top:14px}
+/* completion history */
+.hist-day{font-family:var(--body);font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;margin:14px 0 6px;font-weight:700}
+.hist-day:first-child{margin-top:0}
+.hist-row{display:flex;align-items:center;gap:9px;padding:7px 2px;border-bottom:1px solid var(--line2)}
+.hist-dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+.hist-t{flex:1;font-family:var(--body);font-size:13.5px;color:var(--ink)}
+.hist-time{font-family:var(--mono);font-size:11.5px;color:var(--mut);flex:0 0 auto}
 
 /* header data dropdown */
 .hmenu-wrap{position:relative}
@@ -429,7 +436,7 @@ main{max-width:1200px;margin:0 auto;padding:22px 22px 120px}
 body.ro .ro-badge{display:inline-flex}
 body.ro .hbtn,body.ro .dact,body.ro .class-all,body.ro .tk-push,body.ro .qf,body.ro .hmenu-item,
 body.ro .tk-check,body.ro .cmini{opacity:.4;cursor:not-allowed}
-body.ro #btn-export{opacity:1;cursor:pointer}
+body.ro #btn-export,body.ro #btn-history{opacity:1;cursor:pointer}
 </style>
 </head>
 <body>
@@ -449,6 +456,7 @@ body.ro #btn-export{opacity:1;cursor:pointer}
       <div class="hmenu-wrap" id="data-menu-wrap">
         <button class="hbtn" id="btn-data">⤓ Data ▾</button>
         <div class="hmenu" id="data-menu">
+          <button class="hmenu-item" id="btn-history">🕐 Completion history</button>
           <button class="hmenu-item" id="btn-import-old">↧ Import old roadmaps</button>
           <button class="hmenu-item" id="btn-export-json">⧉ Export progress (JSON)</button>
           <button class="hmenu-item" id="btn-import-json">↥ Restore from JSON file</button>
@@ -829,13 +837,19 @@ function guardEdit(){
 }
 
 var KEY="mission_control_v1";
-var STATE={done:{},leaves:{},classDone:{},contestDone:{},pushed:{},pinned:{},noBackfill:{},selDate:TODAY,anchor:TODAY};
+var STATE={done:{},doneAt:{},leaves:{},classDone:{},contestDone:{},pushed:{},pinned:{},noBackfill:{},selDate:TODAY};
 (function(){var raw=store.get(KEY);if(raw){try{STATE=Object.assign(STATE,JSON.parse(raw));}catch(e){}}})();
 if(!STATE.selDate) STATE.selDate=TODAY;
 if(!STATE.pinned) STATE.pinned={};   // older saves won't have this
 if(!STATE.noBackfill) STATE.noBackfill={};
-function persistLocalOnly(){store.set(KEY,JSON.stringify({done:STATE.done,leaves:STATE.leaves,classDone:STATE.classDone,contestDone:STATE.contestDone,pushed:STATE.pushed,pinned:STATE.pinned,noBackfill:STATE.noBackfill,selDate:STATE.selDate}));}
+if(!STATE.doneAt) STATE.doneAt={};   // older saves won't have this — no timestamp for pre-existing completions
+function persistLocalOnly(){store.set(KEY,JSON.stringify({done:STATE.done,doneAt:STATE.doneAt,leaves:STATE.leaves,classDone:STATE.classDone,contestDone:STATE.contestDone,pushed:STATE.pushed,pinned:STATE.pinned,noBackfill:STATE.noBackfill,selDate:STATE.selDate}));}
 function persist(){persistLocalOnly();CLOUD.push();}
+/* Single source of truth for marking a task done/undone — always keeps
+   STATE.doneAt in sync so completion history stays accurate everywhere. */
+function markDone(id){ if(!id)return; STATE.done[id]=1; STATE.doneAt[id]=new Date().toISOString(); }
+function markUndone(id){ if(!id)return; delete STATE.done[id]; delete STATE.doneAt[id]; }
+function setDone(id,done){ if(done) markDone(id); else markUndone(id); }
 
 /* ============================================================
    CLOUD SYNC (optional — Firebase Realtime Database)
@@ -851,7 +865,7 @@ var FIREBASE_CONFIG = {
   databaseURL: "https://masterplanner-70284-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "masterplanner-70284"
 };
-var CLOUD_FIELDS = ["done","leaves","classDone","contestDone","pushed","pinned","noBackfill"];
+var CLOUD_FIELDS = ["done","doneAt","leaves","classDone","contestDone","pushed","pinned","noBackfill"];
 var CLOUD = (function(){
   var enabled = !!(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.databaseURL);
   var ref = null, applying = false;
@@ -1122,9 +1136,12 @@ function buildSchedule(){
     return ["ml","gsoc","sna"];
   }
 
-  // iterate day by day from anchor(today) to SEM_END
-  var d=STATE.anchor||TODAY;
-  if(d<SEM_START) d=SEM_START;
+  // Iterate day by day from the semester start (not "today") — otherwise days
+  // before today never get a computed schedule, which makes past days show as
+  // empty and un-checkable. The scheduler is a deterministic function of the
+  // date and current done-state, so re-running it from SEM_START is safe and
+  // gives every past day a real, toggleable task list too.
+  var d=SEM_START;
   var guard=0, LAST=SEM_END;
   var dsaSolvedRunning = countDoneTrack("dsa");
   while(d<=LAST && guard<1200){
@@ -1521,9 +1538,10 @@ function renderRails(){
 
 /* ---------- calendar ---------- */
 function dayDots(dstr){
-  var s=SCHEDULE[dstr];if(!s)return{tracks:{},contest:false,count:0};
+  var s=SCHEDULE[dstr];if(!s)return{tracks:{},contest:false,count:0,done:0};
   var tr={};s.tasks.forEach(function(t){tr[t.track]=true;});
-  return {tracks:tr,contest:!!s.contest,count:s.tasks.length};
+  var done=s.tasks.filter(function(t){return !!STATE.done[t.id];}).length;
+  return {tracks:tr,contest:!!s.contest,count:s.tasks.length,done:done};
 }
 function dayAllDone(dstr){
   var s=SCHEDULE[dstr];if(!s||!s.tasks.length)return false;
@@ -1549,7 +1567,7 @@ function renderCalendar(){
     var dotHtml="";
     ["sna","ml","gsoc","dsa"].forEach(function(tk){if(dots.tracks[tk])dotHtml+='<span class="dot '+tk+'"></span>';});
     if(dots.contest)dotHtml+='<span class="dot contest"></span>';
-    var cntHtml=dots.count?'<span class="cnt">'+dots.count+'</span>':'';
+    var cntHtml=dots.count?'<span class="cnt">'+dots.done+'/'+dots.count+'</span>':'';
     var chk=dayAllDone(ds)?'<span class="allcheck">✓</span>':'';
     cell.innerHTML='<span class="dnum">'+dnum+'</span>'+
       (tagTxt?'<span class="daytag">'+tagTxt+'</span>':'')+
@@ -1810,7 +1828,7 @@ function refreshProgress(){renderRails();renderCalendar();renderDay();}
 
 function toggleTask(id){
   if(guardEdit())return;
-  STATE.done[id]=!STATE.done[id];
+  setDone(id,!STATE.done[id]);
   persist();
   // Finishing a task must NOT re-plan the day — that pulls future work forward and
   // makes the day refill. Just reflect done-state; the calendar/rails read STATE.done
@@ -1981,7 +1999,7 @@ document.getElementById("back-save").addEventListener("click",function(){
   sched.tasks.forEach(function(t){
     var inc = what==="incomplete"? !STATE.done[t.id] : what==="all"? true : (t.track===track);
     if(inc){
-      if(what==="all"&&STATE.done[t.id]) STATE.done[t.id]=false;
+      if(what==="all"&&STATE.done[t.id]) markUndone(t.id);
       STATE.pushed[t.id]=target;
       STATE.pinned[t.id]=target;   // explicit push = it goes there, full stop
       moved++;
@@ -2193,7 +2211,7 @@ function flipGNode(org,title){
   if(guardEdit())return;
   var ids=gNodeIds(org,title); if(!ids.length) return;
   var allDone=ids.every(function(id){return !!STATE.done[id];});
-  ids.forEach(function(id){ if(allDone) delete STATE.done[id]; else STATE.done[id]=1; });
+  ids.forEach(function(id){ setDone(id,!allDone); });
   persist(); refreshProgress();
 }
 /* SNA task = all its sessions. */
@@ -2203,7 +2221,7 @@ function flipSNode(title){
   if(guardEdit())return;
   var ids=sNodeIds(title); if(!ids.length) return;
   var allDone=ids.every(function(id){return !!STATE.done[id];});
-  ids.forEach(function(id){ if(allDone) delete STATE.done[id]; else STATE.done[id]=1; });
+  ids.forEach(function(id){ setDone(id,!allDone); });
   persist(); refreshProgress();
 }
 /* ML node = all its sessions. "done" only when every session is done. */
@@ -2213,14 +2231,14 @@ function flipMlNode(title){
   if(guardEdit())return;
   var ids=mlNodeIds(title); if(!ids.length) return;
   var allDone=ids.every(function(id){return !!STATE.done[id];});
-  ids.forEach(function(id){ if(allDone) delete STATE.done[id]; else STATE.done[id]=1; });
+  ids.forEach(function(id){ setDone(id,!allDone); });
   persist(); refreshProgress();
 }
 function isDone(id){ return id && !!STATE.done[id]; }
 function flipDone(id){
   if(guardEdit())return;
   if(!id) return;
-  if(STATE.done[id]) delete STATE.done[id]; else STATE.done[id]=1;
+  setDone(id,!STATE.done[id]);
   persist(); refreshProgress();
 }
 /* Update a tab view's hero stats, progress bar, phase counters and finish banner
@@ -2406,7 +2424,7 @@ function renderDSAView(){
       solvedBtn.addEventListener("click",function(){
         if(guardEdit())return;
         // update state + this row only; no full re-render, so the topic stays open
-        if(STATE.done[id]) delete STATE.done[id]; else STATE.done[id]=1;
+        setDone(id,!STATE.done[id]);
         persist();
         var nowDone=!!STATE.done[id];
         solvedBtn.classList.toggle("on",nowDone);
@@ -2476,6 +2494,53 @@ function openCodeModal(id,title){
   document.getElementById("code-clear").onclick=function(){
     document.getElementById("code-notes").value="";document.getElementById("code-code").value="";
   };
+  ov.classList.add("show");
+}
+
+/* ---------- completion history ---------- */
+var TASKS_BY_ID=null;
+function taskById(id){
+  if(!TASKS_BY_ID){ TASKS_BY_ID={}; TASKS.forEach(function(t){TASKS_BY_ID[t.id]=t;}); }
+  return TASKS_BY_ID[id];
+}
+function openHistoryModal(){
+  var ov=document.getElementById("history-overlay");
+  if(!ov){
+    ov=E("div","overlay","");ov.id="history-overlay";
+    ov.innerHTML='<div class="sheet" style="max-width:560px;max-height:78vh;display:flex;flex-direction:column">'+
+      '<div class="sheet-h"><b>Completion history</b><button class="x" id="history-x">✕</button></div>'+
+      '<div class="sheet-b" id="history-body" style="overflow-y:auto"></div></div>';
+    document.body.appendChild(ov);
+    ov.addEventListener("click",function(e){if(e.target===ov)ov.classList.remove("show");});
+    document.getElementById("history-x").addEventListener("click",function(){ov.classList.remove("show");});
+  }
+  var body=document.getElementById("history-body");
+  var entries=Object.keys(STATE.doneAt).map(function(id){ return {id:id, at:STATE.doneAt[id], t:taskById(id)}; })
+    .filter(function(e){return e.t && e.at;})
+    .sort(function(a,b){return a.at<b.at?1:a.at>b.at?-1:0;}); // newest first
+  var untimed=Object.keys(STATE.done).filter(function(id){return !STATE.doneAt[id];}).length;
+  if(!entries.length){
+    body.innerHTML='<p style="color:var(--mut);font-size:13.5px;padding:4px 2px">No timestamped completions yet — tick a task to start this log.'+
+      (untimed?' ('+untimed+' earlier completion'+(untimed===1?"":"s")+' from before this feature has no timestamp.)':'')+'</p>';
+  } else {
+    var byDay={}, order=[];
+    entries.forEach(function(e){
+      var day=e.at.slice(0,10);
+      if(!byDay[day]){byDay[day]=[];order.push(day);}
+      byDay[day].push(e);
+    });
+    var html="";
+    order.forEach(function(day){
+      html+='<div class="hist-day">'+fmt(day)+'</div>';
+      byDay[day].forEach(function(e){
+        var time=new Date(e.at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+        html+='<div class="hist-row"><span class="hist-dot" style="background:'+(PA[e.t.track]||"var(--ink)")+'"></span>'+
+          '<span class="hist-t">'+e.t.title+'</span><span class="hist-time">'+time+'</span></div>';
+      });
+    });
+    if(untimed) html+='<p style="color:var(--mut);font-size:12px;margin-top:12px">+'+untimed+' earlier completion'+(untimed===1?"":"s")+' with no timestamp (done before this feature was added).</p>';
+    body.innerHTML=html;
+  }
   ov.classList.add("show");
 }
 
@@ -2691,7 +2756,7 @@ function importOldRoadmaps(){
       var solved=ds.solved||{}, self=ds.self||{}, opt=ds.optimal||{}, notes=ds.notes||{};
       Object.keys(IMPORT_MAP.dsa.pos2title).forEach(function(pos){
         var title=IMPORT_MAP.dsa.pos2title[pos], id=idFor("dsa",title); if(!id) return;
-        if(solved[pos]===true){ if(!STATE.done[id]){STATE.done[id]=1;report.dsa++;} }
+        if(solved[pos]===true){ if(!STATE.done[id]){markDone(id);report.dsa++;} }
         if(self[pos]===true){ STATE.dsaSelf[id]=1;report.dsaSelf++; }
         if(opt[pos]===true){ STATE.dsaOpt[id]=1;report.dsaOpt++; }
         var nk=notes["c"+pos];
@@ -2708,7 +2773,7 @@ function importOldRoadmaps(){
       Object.keys(mdone).forEach(function(oldId){
         if(!mdone[oldId]) return;
         var title=IMPORT_MAP.ml.id2title[oldId]; if(!title) return;
-        var ids=mlNodeIds(title); ids.forEach(function(id){ if(!STATE.done[id]){STATE.done[id]=1;} }); if(ids.length)report.ml++;
+        var ids=mlNodeIds(title); ids.forEach(function(id){ if(!STATE.done[id]){markDone(id);} }); if(ids.length)report.ml++;
       });
     }
   }catch(e){}
@@ -2721,7 +2786,7 @@ function importOldRoadmaps(){
       Object.keys(sdone).forEach(function(oldId){
         if(!sdone[oldId]) return;
         var title=IMPORT_MAP.sna.id2title[oldId]; if(!title) return;
-        var id=idFor("sna",title); if(id&&!STATE.done[id]){STATE.done[id]=1;report.sna++;}
+        var id=idFor("sna",title); if(id&&!STATE.done[id]){markDone(id);report.sna++;}
       });
     }
   }catch(e){}
@@ -2734,7 +2799,7 @@ function importOldRoadmaps(){
         // dbpedia: one localStorage key per item: PREFIX + phaseId-idx = "1"
         Object.keys(spec.id2title).forEach(function(oldId){
           var v=rawGet(spec.key+oldId);
-          if(v==="1"){ var title=spec.id2title[oldId]; var gi2=gNodeIds(org,title); gi2.forEach(function(id){if(!STATE.done[id])STATE.done[id]=1;}); if(gi2.length)report.gsoc++; }
+          if(v==="1"){ var title=spec.id2title[oldId]; var gi2=gNodeIds(org,title); gi2.forEach(function(id){if(!STATE.done[id])markDone(id);}); if(gi2.length)report.gsoc++; }
         });
       } else {
         var raw=rawGet(spec.key); if(!raw) return;
@@ -2742,7 +2807,7 @@ function importOldRoadmaps(){
         Object.keys(done).forEach(function(oldId){
           if(!done[oldId]) return;
           var title=spec.id2title[oldId]; if(!title) return;
-          var gi3=gNodeIds(org,title); gi3.forEach(function(id){if(!STATE.done[id])STATE.done[id]=1;}); if(gi3.length)report.gsoc++;
+          var gi3=gNodeIds(org,title); gi3.forEach(function(id){if(!STATE.done[id])markDone(id);}); if(gi3.length)report.gsoc++;
         });
       }
     }catch(e){}
@@ -2757,7 +2822,7 @@ function importOldRoadmaps(){
 /* ---------- JSON backup / restore ---------- */
 function fullStateBlob(){
   return { _app:"mission-control", _v:1, _saved:new Date().toISOString(),
-    done:STATE.done, leaves:STATE.leaves, classDone:STATE.classDone, contestDone:STATE.contestDone,
+    done:STATE.done, doneAt:STATE.doneAt, leaves:STATE.leaves, classDone:STATE.classDone, contestDone:STATE.contestDone,
     pushed:STATE.pushed, pinned:STATE.pinned, noBackfill:STATE.noBackfill, selDate:STATE.selDate,
     dsaSelf:STATE.dsaSelf, dsaOpt:STATE.dsaOpt, dsaNote:STATE.dsaNote };
 }
@@ -2771,7 +2836,7 @@ function exportJSON(){
 function applyBlob(obj){
   if(guardEdit())return false;
   if(!obj||obj._app!=="mission-control"){ toast("That doesn't look like a Mission Control backup."); return false; }
-  ["done","leaves","classDone","contestDone","pushed","pinned","noBackfill","dsaSelf","dsaOpt","dsaNote"].forEach(function(k){ if(obj[k]) STATE[k]=obj[k]; });
+  ["done","doneAt","leaves","classDone","contestDone","pushed","pinned","noBackfill","dsaSelf","dsaOpt","dsaNote"].forEach(function(k){ if(obj[k]) STATE[k]=obj[k]; });
   if(obj.selDate) STATE.selDate=obj.selDate;
   persist(); rebuildAll(); renderActiveView(); if(typeof selectDate==="function") selectDate(STATE.selDate);
   return true;
@@ -2792,6 +2857,7 @@ function importJSONFile(file){
     document.addEventListener("click",function(e){ if(dw&&!dw.contains(e.target)) dm.classList.remove("show"); });
     dm.querySelectorAll(".hmenu-item").forEach(function(it){ it.addEventListener("click",function(){ dm.classList.remove("show"); }); });
   }
+  on("btn-history", openHistoryModal);
   on("btn-import-old", function(){
     if(confirm("Import your completed tasks from the old individual roadmaps (DSA, ML, SNA, GSoC)?\n\nThis only finds data saved in THIS browser. Nothing is overwritten — it only adds ticks.")) importOldRoadmaps();
   });
