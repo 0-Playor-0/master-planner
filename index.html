@@ -1450,6 +1450,7 @@ var viewYear, viewMonth; // calendar view
 (function(){var d=parse(STATE.selDate);viewYear=d.getFullYear();viewMonth=d.getMonth();})();
 
 function el(tag,cls,html){var e=document.createElement(tag);if(cls)e.className=cls;if(html!=null)e.innerHTML=html;return e;}
+function escapeHtml(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 
 /* ---------- header clock + rails ---------- */
 function renderClock(){
@@ -1528,7 +1529,7 @@ function renderCalendar(){
     if(ds===STATE.selDate) cell.classList.add("sel");
     if(ds<TODAY) cell.classList.add("past");
     var dots=dayDots(ds);
-    var tagTxt=dt.label?dt.label:"";
+    var tagTxt=dt.label?escapeHtml(dt.label):"";
     var dotHtml="";
     ["sna","ml","gsoc","dsa"].forEach(function(tk){if(dots.tracks[tk])dotHtml+='<span class="dot '+tk+'"></span>';});
     if(dots.contest)dotHtml+='<span class="dot contest"></span>';
@@ -1596,7 +1597,7 @@ function renderDay(){
   var badges=document.getElementById("day-badges");badges.innerHTML="";
   if(dt.type!=="normal"){
     var map={exam:"exam",prep:"prep",holiday:"holiday",event:"holiday",leave:"leave",brk:"brk"};
-    var b=el("span","dbadge "+(map[dt.type]||""),dt.label);badges.appendChild(b);
+    var b=el("span","dbadge "+(map[dt.type]||""),escapeHtml(dt.label));badges.appendChild(b);
   }
   if(dt.type==="exam") badges.appendChild(el("span","dbadge exam","Exam day — 1h DSA + \u22641h light research"));
   if(dt.type==="prep") badges.appendChild(el("span","dbadge prep","50% load — exam prep"));
@@ -1657,7 +1658,7 @@ function renderDay(){
     if(dt.type!=="leave"){
       body.appendChild(el("div","free-note","— classes only today; labs leave little study time. Roadmap work resumes on your next open day. —"));
     } else {
-      var e=el("div","day-empty",'<div class="big">On leave</div><p>'+(dt.label||"You marked this day as busy.")+' Work has been pushed forward automatically.</p>');
+      var e=el("div","day-empty",'<div class="big">On leave</div><p>'+(dt.label?escapeHtml(dt.label):"You marked this day as busy.")+' Work has been pushed forward automatically.</p>');
       body.appendChild(e);
     }
     document.getElementById("footer").innerHTML=footerText();
@@ -2724,7 +2725,7 @@ function importOldRoadmaps(){
 function fullStateBlob(){
   return { _app:"mission-control", _v:1, _saved:new Date().toISOString(),
     done:STATE.done, leaves:STATE.leaves, classDone:STATE.classDone, contestDone:STATE.contestDone,
-    pushed:STATE.pushed, selDate:STATE.selDate,
+    pushed:STATE.pushed, pinned:STATE.pinned, noBackfill:STATE.noBackfill, selDate:STATE.selDate,
     dsaSelf:STATE.dsaSelf, dsaOpt:STATE.dsaOpt, dsaNote:STATE.dsaNote };
 }
 function exportJSON(){
@@ -2736,7 +2737,7 @@ function exportJSON(){
 }
 function applyBlob(obj){
   if(!obj||obj._app!=="mission-control"){ toast("That doesn't look like a Mission Control backup."); return false; }
-  ["done","leaves","classDone","contestDone","pushed","dsaSelf","dsaOpt","dsaNote"].forEach(function(k){ if(obj[k]) STATE[k]=obj[k]; });
+  ["done","leaves","classDone","contestDone","pushed","pinned","noBackfill","dsaSelf","dsaOpt","dsaNote"].forEach(function(k){ if(obj[k]) STATE[k]=obj[k]; });
   if(obj.selDate) STATE.selDate=obj.selDate;
   persist(); rebuildAll(); renderActiveView(); if(typeof selectDate==="function") selectDate(STATE.selDate);
   return true;
