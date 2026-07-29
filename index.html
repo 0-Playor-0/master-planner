@@ -845,16 +845,33 @@ var CLOUD = (function(){
       ref = firebase.database().ref(KEY);
     } catch(e) { enabled = false; }
   }
+  // Firebase RTDB keys can't contain ".", "#", "$", "/", "[", "]" —
+  // task ids like "dsa#257" and day keys like "2026-07-27#0" do, so
+  // encode/decode around every push/pull.
+  function encodeKeys(obj){
+    var out={};
+    Object.keys(obj||{}).forEach(function(k){
+      out[k.replace(/[.#$\/\[\]]/g,function(c){return "~"+c.charCodeAt(0)+"~";})]=obj[k];
+    });
+    return out;
+  }
+  function decodeKeys(obj){
+    var out={};
+    Object.keys(obj||{}).forEach(function(k){
+      out[k.replace(/~(\d+)~/g,function(_,code){return String.fromCharCode(+code);})]=obj[k];
+    });
+    return out;
+  }
   function snapshot(){
     var out={};
-    CLOUD_FIELDS.forEach(function(k){ out[k]=STATE[k]; });
+    CLOUD_FIELDS.forEach(function(k){ out[k]=encodeKeys(STATE[k]); });
     return out;
   }
   return {
     enabled: enabled,
     push: function(){
       if (!enabled || applying) return;
-      ref.set(snapshot());
+      ref.set(snapshot()).catch(function(e){ console.error("cloud sync push failed", e); });
     },
     listen: function(onRemote){
       if (!enabled) return;
@@ -862,7 +879,7 @@ var CLOUD = (function(){
         var val = snap.val();
         if (!val) return; // nothing in the cloud yet — our next push will seed it
         applying = true;
-        CLOUD_FIELDS.forEach(function(k){ if (val[k]!==undefined) STATE[k]=val[k]; });
+        CLOUD_FIELDS.forEach(function(k){ if (val[k]!==undefined) STATE[k]=decodeKeys(val[k]); });
         applying = false;
         onRemote();
       });
