@@ -909,9 +909,15 @@ var CLOUD = (function(){
         var val = snap.val();
         if (!val) return; // nothing in the cloud yet — our next push will seed it
         applying = true;
-        CLOUD_FIELDS.forEach(function(k){ if (val[k]!==undefined) STATE[k]=decodeKeys(val[k]); });
+        var changed=[];
+        CLOUD_FIELDS.forEach(function(k){
+          if (val[k]===undefined) return;
+          var decoded=decodeKeys(val[k]);
+          if (JSON.stringify(decoded)!==JSON.stringify(STATE[k])) changed.push(k);
+          STATE[k]=decoded;
+        });
         applying = false;
-        onRemote();
+        onRemote(changed);
       });
     }
   };
@@ -2868,9 +2874,15 @@ function importJSONFile(file){
 })();
 
 /* live-sync progress from the cloud, if configured (see CLOUD block above) */
-CLOUD.listen(function(){
+CLOUD.listen(function(changed){
   persistLocalOnly();
-  rebuildAll();
+  // Only a full replan (buildSchedule) if something schedule-affecting actually
+  // changed remotely (leaves/pushes/pins). Marking a task done — including the
+  // echo of our own write bouncing back from Firebase — must NOT replan, same
+  // as the local toggle path: replanning on every completion would refill the
+  // day with pulled-forward work mid-session.
+  var structural = changed.some(function(k){ return k==="leaves"||k==="pushed"||k==="pinned"||k==="noBackfill"; });
+  if(structural) rebuildAll(); else refreshProgress();
   renderActiveView();
 });
 
