@@ -1142,12 +1142,13 @@ function buildSchedule(){
     return ["ml","gsoc","sna"];
   }
 
-  // Iterate day by day from the semester start (not "today") — otherwise days
-  // before today never get a computed schedule, which makes past days show as
-  // empty and un-checkable. The scheduler is a deterministic function of the
-  // date and current done-state, so re-running it from SEM_START is safe and
-  // gives every past day a real, toggleable task list too.
-  var d=SEM_START;
+  // Iterate day by day from TODAY, never earlier. The scheduler is self-healing:
+  // every rebuild walks forward filling any open capacity with the next not-done
+  // task. If past days were included in that walk, completing a task on a past
+  // day would free up capacity there, and the very next rebuild would refill it
+  // with newly-pulled-forward work — forever, since a "done" past day always has
+  // open capacity once its tasks are checked off. Past days must stay frozen.
+  var d=TODAY;
   var guard=0, LAST=SEM_END;
   var dsaSolvedRunning = countDoneTrack("dsa");
   while(d<=LAST && guard<1200){
