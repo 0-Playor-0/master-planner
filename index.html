@@ -1257,16 +1257,15 @@ function buildSchedule(){
         var EXAM_RESEARCH_CAP=1;
         function tryExamResearch(lane,isRes){
           if(placedR) return;
-          for(var xi=0;xi<Q[lane].length;xi++){
-            var ct=Q[lane][xi];
-            if(ct.est>EXAM_RESEARCH_CAP+0.001) continue;  // too long for an exam day — leave it
-            if(!isRes(ct)) continue;
-            if(!isExamLight(ct)) continue;                // must be a genuinely light action
-            var msx=minStart(ct); if(msx && d<msx) continue;
-            if(!fitInBins(bins,ct.est)) continue;
-            Q[lane].splice(xi,1);
-            slotList.push(ct); TASK_DATE[ct.id]=d; placedR=true; return;
-          }
+          if(!Q[lane].length) return;
+          var ct=Q[lane][0];                              // front-of-queue only, no scanning ahead
+          if(ct.est>EXAM_RESEARCH_CAP+0.001) return;       // too long for an exam day — leave it, don't skip past
+          if(!isRes(ct)) return;
+          if(!isExamLight(ct)) return;                     // must be a genuinely light action
+          var msx=minStart(ct); if(msx && d<msx) return;
+          if(!fitInBins(bins,ct.est)) return;
+          Q[lane].shift();
+          slotList.push(ct); TASK_DATE[ct.id]=d; placedR=true;
         }
         tryExamResearch("gsoc",isResearchGsoc);
         tryExamResearch("sna",isResearchSna);
