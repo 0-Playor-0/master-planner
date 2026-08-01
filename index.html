@@ -1077,8 +1077,12 @@ function buildSchedule(){
   //    We schedule DSA first (below) to know when topic 9 completes.
   // Queues per track (only not-done tasks), preserving order.
   function queue(track){
+    // NOTE: deliberately NOT filtering out done tasks. Placement is a fixed
+    // function of the task pool + calendar only, computed the same way whether
+    // a task is done or not — done-state only ever affects the checkbox/timestamp
+    // shown on whatever day a task already lands on. This is what makes the plan
+    // stable: completing something can never reopen its slot for a different task.
     var list=BY_TRACK[track].filter(function(t){
-      if(STATE.done[t.id]) return false;
       if(track==="sna" && t.postnov) return false; // postnov handled as low-intensity later
       return true;
     });
@@ -1142,15 +1146,13 @@ function buildSchedule(){
     return ["ml","gsoc","sna"];
   }
 
-  // Iterate day by day from TODAY, never earlier. The scheduler is self-healing:
-  // every rebuild walks forward filling any open capacity with the next not-done
-  // task. If past days were included in that walk, completing a task on a past
-  // day would free up capacity there, and the very next rebuild would refill it
-  // with newly-pulled-forward work — forever, since a "done" past day always has
-  // open capacity once its tasks are checked off. Past days must stay frozen.
-  var d=TODAY;
+  // Iterate day by day from SEM_START. This now safe to do — since queue()
+  // no longer removes done tasks, the walk always produces the exact same
+  // placement regardless of completion state, so a past day's task list is
+  // permanently fixed and can never get "refilled" by completing something.
+  var d=SEM_START;
   var guard=0, LAST=SEM_END;
-  var dsaSolvedRunning = countDoneTrack("dsa");
+  var dsaSolvedRunning = 0; // fixed structural milestone (Nth DSA task placed), not real-world pace
   while(d<=LAST && guard<1200){
     guard++;
     var dt=dayType(d);
@@ -1275,15 +1277,13 @@ function buildSchedule(){
         for(var oi=0;oi<order.length;oi++){
           var ln=order[oi];
           if(Q[ln] && Q[ln].length){
-            // respect pushes: peek first schedulable
-            var idx=0,okTask=null;
-            for(;idx<Q[ln].length;idx++){
-              var cand=Q[ln][idx]; var msx=minStart(cand);
-              if(msx && d<msx) continue;
-              if(!bins.some(function(b){return b+FIT_TOL>=cand.est;})) continue;
-              okTask=idx; break;
-            }
-            if(okTask!==null){ chosen=ln; break; }
+            // Strict FIFO: only ever look at the FRONT of the queue. A task that
+            // doesn't fit today blocks its whole lane for today rather than letting
+            // a later, easier-to-fit task cut in front of it — that skip-ahead is
+            // exactly what let "Weeks 9-11" content schedule before "Weeks 7-10".
+            var cand=Q[ln][0]; var msx=minStart(cand);
+            var fits=!(msx && d<msx) && bins.some(function(b){return b+FIT_TOL>=cand.est;});
+            if(fits){ chosen=ln; break; }
           }
         }
         if(chosen){
@@ -1302,18 +1302,12 @@ function buildSchedule(){
           var bigUsed=0;
           slotList.forEach(function(x){ if(x.track!=="dsa") bigUsed+=x.est; });
           while(Q[chosen].length && placed<maxTasks && maxBin(bins)>0.4 && bigUsed<comfort-0.001){
-            // find next schedulable (skip pushed-not-yet)
-            var pi=0,pick=null;
-            for(;pi<Q[chosen].length;pi++){
-              var c2=Q[chosen][pi]; var m3=minStart(c2);
-              if(m3 && d<m3) continue;                       // not yet allowed by its month
-              if(!bins.some(function(b){return b+FIT_TOL>=c2.est;})) continue; // won't fit today
-              pick=pi; break;
-            }
-            if(pick===null) break;
-            var cand2=Q[chosen][pick];
+            // Strict FIFO — only the front task; if it can't go today, stop for today.
+            var cand2=Q[chosen][0]; var m3=minStart(cand2);
+            if(m3 && d<m3) break;                                       // not yet allowed by its month
+            if(!bins.some(function(b){return b+FIT_TOL>=cand2.est;})) break; // won't fit today
             if(!fitInBins(bins,cand2.est)) break;      // must fit a contiguous block
-            var task=Q[chosen].splice(pick,1)[0];
+            var task=Q[chosen].shift();
             slotList.push(task);TASK_DATE[task.id]=d;placed++;bigUsed+=task.est;
           }
           // ----- optional SECOND lane -----
@@ -1342,51 +1336,17 @@ function buildSchedule(){
               if(!second) break;
               var placed2=0;
               while(Q[second].length && placed2<3 && maxBin(bins)>=1 && bigUsed2<comfort2-0.001){
-                var qi2=0,pick2=null;
-                for(;qi2<Q[second].length;qi2++){
-                  var c4=Q[second][qi2]; var m4=minStart(c4);
-                  if(m4 && d<m4) continue;
-                  if(!bins.some(function(b){return b+FIT_TOL>=c4.est;})) continue;
-                  if(bigUsed2+c4.est>comfort2+0.001) continue;
-                  pick2=qi2; break;
-                }
-                if(pick2===null) break;
-                var cand4=Q[second][pick2];
-                if(!fitInBins(bins,cand4.est)) break;
-                var t4=Q[second].splice(pick2,1)[0];
+                // Strict FIFO — only the front task; stop this lane for today if it can't go.
+                var c4=Q[second][0]; var m4=minStart(c4);
+                if(m4 && d<m4) break;
+                if(!bins.some(function(b){return b+FIT_TOL>=c4.est;})) break;
+                if(bigUsed2+c4.est>comfort2+0.001) break;
+                if(!fitInBins(bins,c4.est)) break;
+                var t4=Q[second].shift();
                 slotList.push(t4);TASK_DATE[t4.id]=d;placed2++;bigUsed2+=t4.est;
               }
             }
           })();
-          if(false){
-            var second=null;
-            for(var si=0;si<order.length;si++){
-              var ln2=order[si];
-              if(ln2===chosen) continue;
-              if(!(Q[ln2] && Q[ln2].length)) continue;
-              second=ln2; break;
-            }
-            if(second){
-              var placed2=0, maxSecond=2;
-              var comfort2b=comfortCap(d);
-              var bigUsed2=0;
-              slotList.forEach(function(x){ if(x.track!=="dsa") bigUsed2+=x.est; });
-              while(Q[second].length && placed2<maxSecond && maxBin(bins)>=1 && bigUsed2<comfort2b-0.001){
-                var qi2=0,pick2=null;
-                for(;qi2<Q[second].length;qi2++){
-                  var c4=Q[second][qi2]; var m4=minStart(c4);
-                  if(m4 && d<m4) continue;
-                  if(!bins.some(function(b){return b+FIT_TOL>=c4.est;})) continue;
-                  pick2=qi2; break;
-                }
-                if(pick2===null) break;
-                var cand4=Q[second][pick2];
-                if(!fitInBins(bins,cand4.est)) break;
-                var t4=Q[second].splice(pick2,1)[0];
-                slotList.push(t4);TASK_DATE[t4.id]=d;placed2++;bigUsed2+=t4.est;
-              }
-            }
-          }
         }
       }
     }
